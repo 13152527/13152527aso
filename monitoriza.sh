@@ -25,3 +25,4 @@ ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6
 echo -e "${YELLOW}\n>> Errores en System Logs: ${NC}"
 journalctl -p 3 -xb | tail -n 10
 echo -e "${GREEN}===== Monitorizacion Completa =====${NC}"
+#funciona
