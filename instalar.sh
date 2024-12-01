@@ -1,45 +1,8 @@
 #!/bin/bash
 
-# Instalar msmtp y otras dependencias necesarias
-sudo apt update
-sudo apt install -y msmtp cron
-
-# Solicitar el correo y la contraseña
-read -p "Introduce tu correo electrónico: " email
-read -s -p "Introduce tu contraseña de correo: " password
-echo
-
-# Solicitar la ubicación donde se encuentra el script monitoriza.sh
-/etc/monitoriza.sh script_path
-
-# Asegurarse de que el script monitoriza.sh tenga permisos de ejecución
-chmod +x "$script_path"
-
-# Crear una entrada en el crontab del sistema para ejecutar el script cada 5 minutos
-# La línea que añadimos en el crontab debe incluir el nombre del usuario actual
-user=$(whoami)
-echo "*/5 * * * * $user $script_path" | sudo tee -a /etc/crontab > /dev/null
-
-# Crear un archivo de servicio systemd para el script
-cat <<EOL | sudo tee /etc/systemd/system/monitoriza.service > /dev/null
-[Unit]
-Description=Servicio de Monitorización del Sistema
-After=network.target
-
-[Service]
-ExecStart=$script_path
-Restart=always
-User=$user
-Group=$user
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-# Recargar los servicios de systemd y habilitar el nuevo servicio
-sudo systemctl daemon-reload
-sudo systemctl enable monitoriza.service
-sudo systemctl start monitoriza.service
+# Crear una entrada en el crontab del sistema para ejecutar el script cada 5 minutos como root
+echo "*/5 * * * * root /etc/monitoriza.sh" | sudo tee -a /etc/crontab > /dev/null
+echo "Cron job añadido para ejecutar el script cada 5 minutos como root."
 
 # Crear la configuración de msmtp
 echo "Configurando msmtp para Gmail..."
@@ -59,5 +22,40 @@ EOL
 
 # Enviar un correo de prueba
 echo -e "Subject: prueba\n\nHola" | msmtp $email
-
 echo "Correo de prueba enviado a $email."
+
+# Crear el servicio systemd para la supervisión (ejecución continua)
+SERVICE_FILE="/etc/systemd/system/monitorizacion.service"
+
+echo "Creando el servicio systemd para la supervisión (ejecución continua)..."
+sudo tee "$SERVICE_FILE" > /dev/null <<EOL
+[Unit]
+Description=Servicio de supervisión del sistema
+After=network.target
+
+[Service]
+ExecStart=/bin/bash /ruta/a/monitoriza.sh
+Restart=always
+RestartSec=5s
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Recargar los servicios de systemd, habilitar e iniciar el servicio
+echo "Recargando systemd y habilitando el servicio de monitoreo..."
+sudo systemctl daemon-reload
+if sudo systemctl enable monitorizacion; then
+  echo "Servicio 'monitorizacion' habilitado con éxito."
+else
+  echo "Error al habilitar el servicio 'monitorizacion'."
+  exit 1
+fi
+
+if sudo systemctl start monitorizacion; then
+  echo "Servicio 'monitorizacion' iniciado con éxito."
+else
+  echo "Error al iniciar el servicio 'monitorizacion'."
+  exit 1
+fi
