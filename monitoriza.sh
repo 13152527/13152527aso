@@ -8,75 +8,77 @@ BLUE='\033[0;34m'
 NC='\033[0m' # Sin color
 
 # Archivo de log
-LOG_FILE="monitorizacion.log"
+LOG_FILE="/var/log/monitorizacion.log"
+
+# Crear el archivo de log si no existe y establecer permisos adecuados
+if [[ ! -f "$LOG_FILE" ]]; then
+    sudo touch "$LOG_FILE" || { printf "${RED}Error al crear el archivo de log en $LOG_FILE.${NC}\n" >&2; exit 1; }
+    sudo chmod 640 "$LOG_FILE" || { printf "${RED}Error al establecer permisos del archivo de log.${NC}\n" >&2; exit 1; }
+fi
+
+# Redirigir stdout y stderr al log (mantener la salida a consola también)
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 # Obtener la dirección de correo y la contraseña desde /etc/msmtprc
-recipient_email=$(grep -i "from" /etc/msmtprc | awk '{print $2}')
-user_email=$(grep -i "user" /etc/msmtprc | awk '{print $2}')
-user_password=$(grep -i "password" /etc/msmtprc | awk '{print $2}')
+recipient_email=$(grep -i "^from" /etc/msmtprc | awk '{print $2}')
+user_email=$(grep -i "^user" /etc/msmtprc | awk '{print $2}')
+user_password=$(grep -i "^password" /etc/msmtprc | awk '{print $2}')
 
 # Comprobamos si se obtuvo el correo y la contraseña correctamente
-if [ -z "$recipient_email" ] || [ -z "$user_password" ]; then
-    echo -e "${RED}No se encontró el correo electrónico o la contraseña en la configuración de msmtp. Asegúrate de que el archivo /etc/msmtprc esté correctamente configurado.${NC}"
+if [[ -z "$recipient_email" || -z "$user_password" ]]; then
+    printf "${RED}No se encontró el correo electrónico o la contraseña en la configuración de msmtp. Asegúrate de que el archivo /etc/msmtprc esté correctamente configurado.${NC}\n"
     exit 1
 fi
 
 # Inicio del script
-echo -e "${GREEN}===== Inicio de Monitorización =====${NC}" | tee -a $LOG_FILE
+printf "${GREEN}===== Inicio de Monitorización =====${NC}\n"
 
 # Obtener el uso de CPU
-CPU_USAGE=$(mpstat | awk '/all/ {print "CPU Load: " $3 "% idle"}')
+cpu_usage=$(mpstat 1 1 | awk '/all/ {print "CPU Load: " 100 - $12 "% used"}')
+if [[ -z "$cpu_usage" ]]; then
+    printf "${RED}Error al obtener el uso de CPU.${NC}\n"
+    cpu_usage="No disponible"
+fi
 
 # Obtener el uso de RAM
-RAM_USAGE=$(free -h | awk '/Mem/ {print "Total Memory: " $2 "\nUsed: " $3 "\nFree: " $4}')
-SWAP_USAGE=$(free -h | awk '/Swap/ {print "Swap - Total: " $2 ", Used: " $3 ", Free: " $4}')
+ram_usage=$(free -h | awk '/Mem/ {print "Total Memory: " $2 "\nUsed: " $3 "\nFree: " $4}')
+swap_usage=$(free -h | awk '/Swap/ {print "Swap - Total: " $2 ", Used: " $3 ", Free: " $4}')
+if [[ -z "$ram_usage" || -z "$swap_usage" ]]; then
+    printf "${RED}Error al obtener el uso de RAM.${NC}\n"
+    ram_usage="No disponible"
+    swap_usage="No disponible"
+fi
 
 # Obtener los procesos que más RAM consumen
-RAM_PROCESSES=$(ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6)
+ram_processes=$(ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6)
+if [[ -z "$ram_processes" ]]; then
+    printf "${RED}Error al obtener los procesos que consumen más RAM.${NC}\n"
+    ram_processes="No disponible"
+fi
 
 # Obtener los procesos que más CPU consumen
-CPU_PROCESSES=$(ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6)
+cpu_processes=$(ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6)
+if [[ -z "$cpu_processes" ]]; then
+    printf "${RED}Error al obtener los procesos que consumen más CPU.${NC}\n"
+    cpu_processes="No disponible"
+fi
 
-# Imprimir la información de uso de CPU, RAM y procesos, y también guardarla en el log
-echo -e "${YELLOW}>> Uso de CPU:${NC}" | tee -a $LOG_FILE
-echo -e "$CPU_USAGE" | tee -a $LOG_FILE
+# Imprimir la información de uso de CPU, RAM y procesos
+printf "${YELLOW}>> Uso de CPU:${NC}\n"
+printf "%s\n" "$cpu_usage"
 
-echo -e "${YELLOW}>> Uso de RAM:${NC}" | tee -a $LOG_FILE
-echo -e "$RAM_USAGE\n$SWAP_USAGE" | tee -a $LOG_FILE
+printf "${YELLOW}>> Uso de RAM:${NC}\n"
+printf "%s\n%s\n" "$ram_usage" "$swap_usage"
 
-echo -e "${YELLOW}>> Procesos que más RAM están consumiendo:${NC}" | tee -a $LOG_FILE
-echo -e "$RAM_PROCESSES" | tee -a $LOG_FILE
+printf "${YELLOW}>> Procesos que más RAM están consumiendo:${NC}\n"
+printf "%s\n" "$ram_processes"
 
-echo -e "${YELLOW}>> Procesos que más CPU están consumiendo:${NC}" | tee -a $LOG_FILE
-echo -e "$CPU_PROCESSES" | tee -a $LOG_FILE
+printf "${YELLOW}>> Procesos que más CPU están consumiendo:${NC}\n"
+printf "%s\n" "$cpu_processes"
 
-# Sección de errores del sistema
-echo -e "${YELLOW}\n>> Errores en System Logs:${NC}" | tee -a $LOG_FILE
-
-echo -e "${RED}Errores Críticos (Emergencia y Alertas):${NC}" | tee -a $LOG_FILE
-journalctl -p 0..1 -xb | tail -n 10 | tee -a $LOG_FILE
-
-echo -e "${RED}Errores Importantes (Errores y Advertencias):${NC}" | tee -a $LOG_FILE
-journalctl -p 2..4 -xb | tail -n 10 | tee -a $LOG_FILE
-
-echo -e "${BLUE}Eventos Informativos (Notificaciones y Debug):${NC}" | tee -a $LOG_FILE
-journalctl -p 5..7 -xb | tail -n 10 | tee -a $LOG_FILE
-
-# Componer el contenido para el correo
-EMAIL_BODY="===== Reporte de Monitorización del Sistema =====\n\n"
-EMAIL_BODY+=">> Uso de CPU:\n$CPU_USAGE\n\n"
-EMAIL_BODY+=">> Uso de RAM:\n$RAM_USAGE\n$SWAP_USAGE\n\n"
-EMAIL_BODY+=">> Procesos que más RAM están consumiendo:\n$RAM_PROCESSES\n\n"
-EMAIL_BODY+=">> Procesos que más CPU están consumiendo:\n$CPU_PROCESSES\n\n"
-EMAIL_BODY+=">> Errores Críticos (Emergencia y Alertas):\n$(journalctl -p 0..1 -xb | tail -n 10)\n\n"
-EMAIL_BODY+=">> Errores Importantes (Errores y Advertencias):\n$(journalctl -p 2..4 -xb | tail -n 10)\n\n"
-EMAIL_BODY+=">> Eventos Informativos (Notificaciones y Debug):\n$(journalctl -p 5..7 -xb | tail -n 10)\n"
-
-# Enviar correo con la información relevante
-echo -e "Subject: Reporte de Monitorización del Sistema\n\n$EMAIL_BODY" | msmtp $recipient_email
-
-echo -e "${GREEN}Reporte enviado a $recipient_email${NC}" | tee -a $LOG_FILE
-
+# Fin del script
+printf "${GREEN}===== Monitorización Completa =====${NC}\n"
+printf "$(date '+%Y-%m-%d %H:%M:%S') - Monitorización completa\n"
 # Fin del script
 echo -e "${GREEN}===== Monitorización Completa =====${NC}" | tee -a $LOG_FILE
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Monitorización completa" >> $LOG_FILE
