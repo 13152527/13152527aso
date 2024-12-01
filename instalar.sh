@@ -1,21 +1,26 @@
 #!/bin/bash
 
-# Instalar msmtp
-sudo apt update
-sudo apt install -y msmtp
+# Actualizar paquetes e instalar msmtp
+sudo apt update && sudo apt install -y msmtp || { printf "Error al instalar msmtp\n" >&2; exit 1; }
 
-# Solicitar el correo y la contraseña
+# Solicitar correo electrónico y contraseña
 read -p "Introduce tu correo electrónico: " email
+while [[ ! "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; do
+    printf "Correo inválido. Inténtalo nuevamente.\n"
+    read -p "Introduce tu correo electrónico: " email
+done
+
 read -s -p "Introduce tu contraseña de correo: " password
-echo
+printf "\n"
 
-# Crear una entrada en el crontab del sistema para ejecutar el script cada 5 minutos como root
-echo "*/5 * * * * root /etc/monitoriza.sh" | sudo tee -a /etc/crontab > /dev/null
+# Validar correo y contraseña
+if [[ -z "$email" || -z "$password" ]]; then
+    printf "El correo y la contraseña no pueden estar vacíos.\n" >&2
+    exit 1
+fi
 
-# Crear la configuración de msmtp
-echo "Configurando msmtp para Gmail..."
-
-cat <<EOL | sudo tee /etc/msmtprc > /dev/null
+# Crear y configurar msmtp
+sudo tee /etc/msmtprc > /dev/null <<EOL
 account default
 host smtp.gmail.com
 port 587
@@ -28,46 +33,45 @@ auth on
 logfile /var/log/msmtp.log
 EOL
 
-# Asegurarse de que el archivo de configuración tenga los permisos correctos
-sudo chmod 600 /etc/msmtprc
+sudo chmod 600 /etc/msmtprc || { printf "Error al configurar permisos de /etc/msmtprc\n" >&2; exit 1; }
 
-# Crear el servicio systemd para la supervisión (ejecución continua)
-SERVICE_FILE="/etc/systemd/system/monitorizacion.service"
-
-echo "Creando el servicio systemd para la supervisión (ejecución continua)..."
-sudo tee "$SERVICE_FILE" > /dev/null <<EOL
+# Configurar el servicio systemd
+sudo tee /etc/systemd/system/monitorizacion.service > /dev/null <<EOL
 [Unit]
 Description=Servicio de supervisión del sistema
 After=network.target
 
 [Service]
 ExecStart=/bin/bash /etc/monitoriza.sh
-Restart=always
-RestartSec=5s
-Type=simple
-
-[Install]
-WantedBy=multi-user.target
+Type=oneshot
 EOL
 
-# Recargar los servicios de systemd, habilitar e iniciar el servicio
-echo "Recargando systemd y habilitando el servicio de monitoreo..."
-sudo systemctl daemon-reload
-if sudo systemctl enable monitorizacion; then
-  echo "Servicio 'monitorizacion' habilitado con éxito."
-else
-  echo "Error al habilitar el servicio 'monitorizacion'."
-  exit 1
-fi
+sudo tee /etc/systemd/system/monitorizacion.timer > /dev/null <<EOL
+[Unit]
+Description=Temporizador para el servicio de supervisión cada 15 minutos
 
-if sudo systemctl start monitorizacion; then
-  echo "Servicio 'monitorizacion' iniciado con éxito."
-else
-  echo "Error al iniciar el servicio 'monitorizacion'."
-  exit 1
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
+EOL
+
+sudo systemctl daemon-reload || { printf "Error al recargar systemd\n" >&2; exit 1; }
+sudo systemctl enable monitorizacion.timer || { printf "Error al habilitar el temporizador\n" >&2; exit 1; }
+sudo systemctl start monitorizacion.timer || { printf "Error al iniciar el temporizador\n" >&2; exit 1; }
+
+# Crear entrada en crontab
+if ! grep -q "/etc/monitoriza.sh" /etc/crontab; then
+    echo "*/5 * * * * root /bin/bash /etc/monitoriza.sh" | sudo tee -a /etc/crontab > /dev/null || { printf "Error al configurar crontab\n" >&2; exit 1; }
 fi
 
 # Enviar un correo de prueba
-echo -e "Subject: prueba\n\nHola" | msmtp $email
+printf "Enviando correo de prueba...\n"
+if ! echo -e "Subject: prueba\n\nHola" | msmtp "$email"; then
+    printf "Error al enviar el correo de prueba\n" >&2
+    exit 1
+fi
 
-echo "Correo de prueba enviado a $email."
+printf "Configuración completa y correo de prueba enviado a %s\n" "$email"
