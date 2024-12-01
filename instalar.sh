@@ -7,13 +7,18 @@ sudo apt install -y msmtp cron
 # Solicitar el correo y la contraseña
 read -p "Introduce tu correo electrónico: " email
 read -s -p "Introduce tu contraseña de correo: " password
+echo
+
+# Solicitar la ubicación donde se encuentra el script monitoriza.sh
+read -p "Introduce la ruta completa donde está el script monitoriza.sh: " script_path
 
 # Asegurarse de que el script monitoriza.sh tenga permisos de ejecución
-chmod +x /home/alumno/proyecto02/monitoriza.sh
+chmod +x "$script_path"
 
 # Crear una entrada en el crontab del sistema para ejecutar el script cada 5 minutos
-# La línea que añadimos en /etc/crontab debe incluir el usuario (en este caso 'alumno')
-echo "*/5 * * * * alumno /home/alumno/proyecto02/monitoriza.sh" | sudo tee -a /etc/crontab > /dev/null
+# La línea que añadimos en el crontab debe incluir el nombre del usuario actual
+user=$(whoami)
+echo "*/5 * * * * $user $script_path" | sudo tee -a /etc/crontab > /dev/null
 
 # Crear un archivo de servicio systemd para el script
 cat <<EOL | sudo tee /etc/systemd/system/monitoriza.service > /dev/null
@@ -22,10 +27,10 @@ Description=Servicio de Monitorización del Sistema
 After=network.target
 
 [Service]
-ExecStart=/home/alumno/proyecto02/monitoriza.sh
+ExecStart=$script_path
 Restart=always
-User=alumno
-Group=alumno
+User=$user
+Group=$user
 
 [Install]
 WantedBy=multi-user.target
@@ -55,4 +60,4 @@ EOL
 # Enviar un correo de prueba
 echo -e "Subject: prueba\n\nHola" | msmtp $email
 
-echo "Correo de prueba enviado a $email.
+echo "Correo de prueba enviado a $email."
