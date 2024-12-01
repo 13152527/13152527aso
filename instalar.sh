@@ -10,7 +10,7 @@ read -s -p "Introduce tu contraseña de correo: " password
 echo
 
 # Solicitar la ubicación donde se encuentra el script monitoriza.sh
-read -p "Introduce la ruta completa donde está el script monitoriza.sh: " script_path
+/etc/monitoriza.sh script_path
 
 # Asegurarse de que el script monitoriza.sh tenga permisos de ejecución
 chmod +x "$script_path"
