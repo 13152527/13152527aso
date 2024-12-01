@@ -25,8 +25,6 @@ auth on
 logfile /var/log/msmtp.log
 EOL
 
-# Asegurarse de que el archivo de configuración tenga los permisos correctos
-sudo chmod 600 /etc/msmtprc
 
 # Enviar un correo de prueba
 echo -e "Subject: prueba\n\nHola" | msmtp $email
