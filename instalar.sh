@@ -59,17 +59,22 @@ WantedBy=timers.target
 EOL
 
 sudo systemctl daemon-reload || { printf "Error al recargar systemd\n" >&2; exit 1; }
-sudo systemctl enable monitorizacion.timer || { printf "Error al habilitar el temporizador\n" >&2; exit 1; }
-sudo systemctl start monitorizacion.timer || { printf "Error al iniciar el temporizador\n" >&2; exit 1; }
+sudo systemctl enable --now monitorizacion.timer || { printf "Error al habilitar o iniciar el temporizador\n" >&2; exit 1; }
 
-# Crear entrada en crontab
+# Validar existencia del script monitoriza.sh
+if [[ ! -f /etc/monitoriza.sh ]]; then
+    printf "El archivo /etc/monitoriza.sh no existe. Crea este archivo para completar la configuración.\n" >&2
+    exit 1
+fi
+
+# Crear entrada en crontab (opcional, ya que se usa un timer)
 if ! grep -q "/etc/monitoriza.sh" /etc/crontab; then
     echo "*/5 * * * * root /bin/bash /etc/monitoriza.sh" | sudo tee -a /etc/crontab > /dev/null || { printf "Error al configurar crontab\n" >&2; exit 1; }
 fi
 
 # Enviar un correo de prueba
 printf "Enviando correo de prueba...\n"
-if ! echo -e "Subject: prueba\n\nHola" | msmtp "$email"; then
+if ! echo -e "Subject: prueba\n\nHola" | msmtp --account=default "$email"; then
     printf "Error al enviar el correo de prueba\n" >&2
     exit 1
 fi
